@@ -1,7 +1,7 @@
 import pandas as pd
 import random
 import numpy as np
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
+from transformers import GPT2TokenizerFast, GPT2LMHeadModel, GPT2Config
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split, RandomSampler, SequentialSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -16,20 +16,30 @@ seed_val = 42               # This step is optional but it wiil enable reproduci
 
 """## Training parameters"""
 epochs = 4			# same as batchsize 
-learning_rate = 5e-4
+learning_rate = 4e-4
 warmup_steps = 1e2
-epsilon = 1e-8
+epsilon = 1e-6
 sample_every = 100          # this produces sample output every 100 steps
 
 """1. Get the Data"""
 # read from csv file 
-greek_ids = pd.read_csv('greek_ids.csv')
+turk_ids = pd.read_csv('train_turk_ids.csv')
 
 """# 2. Format Data """
 
 def format_data(df):
     # Drop columns with no information
-    df = df.drop(['Unnamed: 0', 'Ύψος'], axis=1)
+    df = df.drop(['Unnamed: 0', 'Issuing Authority'], axis=1)
+    
+    # its important to have all dtypes in sting format 
+    df['Identity No'] = df['Identity No'].apply(str)
+    
+    # remove '.' becasuse produce conflicts with ',' 
+    df["Valid Until"] =  df["Valid Until"].str.replace('.', '/', regex=True)
+    df["Date of Birth"] =  df["Date of Birth"].str.replace('.', '/', regex=True)
+    
+    # remove Y.A. no real use
+    #df['Αρχή Έκδοσης Δελτίου'] = df['Αρχή Έκδοσης Δελτίου'].str[5:]
     
     # convert it dictionary for easier 
     dictQA = df.to_dict(orient = 'records')
@@ -40,27 +50,26 @@ def format_data(df):
     
     for index in dictQA:
         for k, v in index.items():
-            line = ' '.join(index.values()) + ", "+ k+  ": "+ v+ "<|endoftext|>"
+            line = ', '.join(index.values()) + ". "+ k+ ":\n"+ v+ "<|endoftext|>"
             data.append(line)
 
     return data
     
     
-data = format_data(greek_ids)
+data = format_data(turk_ids)
 
 """3. Tokenization"""
 
 # add extra special tokens
-tokenizer = GPT2Tokenizer.from_pretrained(model_name,
-                                          eos_token='<|endoftext|>', 
-                                          pad_token='<|pad|>' )
+tokenizer = GPT2TokenizerFast.from_pretrained(model_name,
+                                        eos_token='<|endoftext|>', 
+                                        pad_token='<|pad|>',
+                                        add_prefix_space=True)
 
 # +1 in any case 
 max_length = max([len(tokenizer.encode(row)) for row in data])
 max_length = max_length+1
 print(f'The longest text is {max_length} tokens long.')
-
-"""4. PyTorch Datasets & Dataloaders"""
 
 class IDDataset(Dataset):
 
@@ -116,7 +125,7 @@ validation_dataloader = DataLoader(
 """# Set GPU or CPU"""
 
 # cleaning the occupied cuda memory
-# torch.cuda.empty_cache()
+torch.cuda.empty_cache()
 # Tell pytorch to run this model on the GPU 
 # if not available then run on cpu 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -303,6 +312,11 @@ df_stats = pd.DataFrame(data=training_stats)
 
 # Use the 'epoch' as the row index.
 df_stats = df_stats.set_index('epoch')
+
+# print stats
+print('\n')
+print(df_stats)
+print('\n')
 
 # Model Info
 # Get all of the model's parameters as a list of tuples.
